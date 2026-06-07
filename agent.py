@@ -1,7 +1,7 @@
 import json
 from groq import Groq, BadRequestError
 from config import GROQ_API_KEY, LLM_MODEL, MAX_TOOL_ROUNDS
-from tools import lookup_plant, get_seasonal_conditions
+from tools import lookup_plant, get_seasonal_conditions, get_plant_list
 
 _client = Groq(api_key=GROQ_API_KEY)
 
@@ -58,6 +58,19 @@ TOOL_DEFINITIONS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_plant_list",
+            "description": (
+                "List every houseplant in the database with its difficulty level. "
+                "Use this when the user asks what plants you know about, wants to "
+                "browse the database, or asks for a recommendation by difficulty "
+                "(for example a good beginner plant)."
+            ),
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
 ]
 
 # ──────────────────────────────────────────────
@@ -76,6 +89,10 @@ SYSTEM_PROMPT = (
     "not in your database, offer general guidance for that type of plant based on "
     "what they describe, and point them to a reliable source (for example a "
     "horticultural society or a reputable plant care site) for exact figures.\n\n"
+    "If the user mentioned a specific plant earlier in this conversation, you may "
+    "reference it when it is relevant to the current question (for example, 'since "
+    "you mentioned your pothos...'). Only do this when it genuinely helps; do not "
+    "force a connection.\n\n"
     "Keep your advice practical and specific. Cite the source of your information "
     "when you have it (e.g., 'According to the care data for your monstera...')."
 )
@@ -99,6 +116,8 @@ def dispatch_tool(tool_name: str, tool_args: dict) -> str:
         result = lookup_plant(tool_args["plant_name"])
     elif tool_name == "get_seasonal_conditions":
         result = get_seasonal_conditions(tool_args.get("season"))
+    elif tool_name == "get_plant_list":
+        result = get_plant_list()
     else:
         result = {"error": f"Unknown tool: {tool_name}"}
     print(f"  ← Result: {json.dumps(result)[:120]}{'...' if len(json.dumps(result)) > 120 else ''}")

@@ -211,3 +211,53 @@ Returned season: summer (detected_season: True)
 ```
 Yes. Returns the Winter dict with detected_season: False even though it is June.
 ```
+
+---
+
+## Function 3: `get_plant_list()`
+
+*Added as an optional challenge: a third tool so the agent can answer "what plants
+do you know about?" and difficulty-based questions like "what's a good beginner
+plant?".*
+
+### Input / Output Contract
+
+**Inputs:** none.
+
+**Output:** `dict`
+
+```python
+{
+    "count": <int>,                       # number of plants in the database
+    "plants": [                           # sorted alphabetically by name
+        {"name": <display_name>, "difficulty": <"easy" | "moderate" | "hard">},
+        ...
+    ]
+}
+```
+
+### Design Decisions
+
+- **Reuses `_plant_db`.** No new data source. Reads only `display_name` and
+  `difficulty` from each entry, so the payload stays small (the LLM does not need
+  the full care record just to list or recommend).
+- **Sorted by name** for a stable, readable list.
+- **No parameters.** The schema in `TOOL_DEFINITIONS` declares an empty
+  `properties` object, matching a tool the LLM calls with no arguments.
+- **When the LLM calls it** is driven by the tool description: browsing the
+  database, "what do you know about", or a difficulty-based recommendation. For
+  recommendations the LLM reads the `difficulty` field (for example, suggesting an
+  `easy` plant for a beginner).
+
+### Implementation Notes
+
+**Test: does "what plants do you know about?" trigger get_plant_list?**
+```
+Yes. The agent calls get_plant_list (no args) and lists the 15 plants.
+```
+
+**Test: does "what's a good beginner plant?" use the difficulty field?**
+```
+Yes. The agent calls get_plant_list and recommends easy-difficulty plants
+(pothos, snake plant, ZZ plant, etc.).
+```

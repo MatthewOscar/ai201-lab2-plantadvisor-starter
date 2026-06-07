@@ -108,3 +108,18 @@ def get_seasonal_conditions(season: str | None = None) -> dict:
     result = dict(_season_data[season_key])
     result["detected_season"] = detected
     return result
+
+
+def get_plant_list() -> dict:
+    """
+    Return the name and difficulty of every plant in the database.
+
+    Used by the agent to answer "what plants do you know about?" and
+    difficulty-based questions like "what's a good beginner plant?".
+    """
+    plants = [
+        {"name": p["display_name"], "difficulty": p["difficulty"]}
+        for p in _plant_db.values()
+    ]
+    plants.sort(key=lambda p: p["name"])
+    return {"count": len(plants), "plants": plants}
