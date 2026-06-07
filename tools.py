@@ -76,7 +76,9 @@ def lookup_plant(plant_name: str) -> dict:
             f"No plant matching '{normalized}' was found in the care database "
             f"(which covers {len(_plant_db)} common houseplants). Tell the user this "
             "specific plant is not in your database, then offer general care guidance "
-            "based on the details or symptoms they describe."
+            "based on the details or symptoms they describe. Do not present general "
+            "advice as if it came from the database, and do not invent specific care "
+            "numbers for this plant."
         ),
     }
 
