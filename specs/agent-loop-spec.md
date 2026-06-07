@@ -122,7 +122,16 @@ for tool_call in assistant_message.tool_calls:
 *The loop should stop when: (a) the LLM returns a response with no tool calls, OR (b) the MAX_TOOL_ROUNDS limit is reached. Describe how you will detect each condition and what you will return in each case.*
 
 ```
-[your answer here]
+Cap the loop at MAX_TOOL_ROUNDS iterations (from config.py).
+
+(a) No tool calls: after each LLM call, read response.choices[0].message. If its
+.tool_calls is empty or None, the LLM has a final answer. Return .content, with a
+static fallback string if .content is empty so the function never returns "".
+
+(b) MAX_TOOL_ROUNDS reached: if every iteration still requested tools, leave the
+loop and make one more LLM call with no tools attached, which forces a text answer
+(the model cannot request more tools). Return that .content, again with a fallback
+if empty. This guarantees both termination and a non-empty return.
 ```
 
 ---
@@ -132,7 +141,10 @@ for tool_call in assistant_message.tool_calls:
 *Once the loop exits because there are no more tool calls, how do you extract the text content from the response object? What field holds the string you should return?*
 
 ```
-[your answer here]
+The text lives at response.choices[0].message.content (a str). Get the assistant
+message with response.choices[0].message, then read .content. Because content can
+be None or "" when a turn was only tool calls, return a fallback string in that case
+to honor the "never empty" contract.
 ```
 
 ---
@@ -145,19 +157,35 @@ for tool_call in assistant_message.tool_calls:
 
 ```
 Query: "How should I care for my calathea?"
-Round 1 tool call: [tool name, args]
-Round 2 tool call: [tool name, args] (if any)
-Final response: [brief description]
+Round 1 tool call: lookup_plant({"plant_name": "calathea"}) -> found: True
+Round 2 tool call: none (the model answered directly after the lookup)
+Final response: detailed calathea care (filtered/consistent moisture, high humidity,
+                low-to-medium indirect light, monthly feeding), citing the care data.
+
+Note: for a generic "how do I care for X" question the model calls only
+lookup_plant. For a season-specific question like "how should I water my monstera
+this time of year?" it calls both lookup_plant and get_seasonal_conditions. The
+agent picks the tools per question rather than always calling both.
 ```
 
 **What happens when you ask about a plant that isn't in the database?**
 
 ```
-[describe the behavior you observed]
+For "string of pearls" (not in the database), the agent calls lookup_plant, gets
+found: False with the not-found message, then tells the user the plant is not in
+the database and falls back to general care guidance. The Milestone 1 not-found
+message is what steers it toward that graceful fallback instead of a dead end.
 ```
 
 **One thing about the tool call API that surprised you:**
 
 ```
-[your answer here]
+Two things, both about robustness rather than the happy path:
+1. For a no-argument call (get_seasonal_conditions), llama-3.3 sometimes sends the
+   arguments as the JSON value null, not "{}". json.loads then returns None and the
+   dispatcher's tool_args.get(...) raises AttributeError. The loop has to coerce the
+   parsed arguments to a dict before dispatch.
+2. The model intermittently emits malformed function-call text that Groq rejects
+   with a 400 'tool_use_failed'. It is non-deterministic, so a bounded retry on the
+   create() call is needed for the agent to be reliable.
 ```

@@ -1,5 +1,5 @@
 import json
-from groq import Groq
+from groq import Groq, BadRequestError
 from config import GROQ_API_KEY, LLM_MODEL, MAX_TOOL_ROUNDS
 from tools import lookup_plant, get_seasonal_conditions
 
@@ -75,6 +75,10 @@ SYSTEM_PROMPT = (
     "when you have it (e.g., 'According to the care data for your monstera...')."
 )
 
+# Returned when a turn produces no usable text (empty content, or MAX_TOOL_ROUNDS
+# reached). Keeps run_agent's contract of never returning an empty string.
+_FALLBACK = "Sorry, I ran into a problem answering that. Could you try rephrasing your question?"
+
 # ──────────────────────────────────────────────
 # Tool dispatch
 #
@@ -99,6 +103,29 @@ def dispatch_tool(tool_name: str, tool_args: dict) -> str:
 # ──────────────────────────────────────────────
 # Agent loop
 # ──────────────────────────────────────────────
+
+def _complete(messages: list, use_tools: bool = True, retries: int = 2):
+    """
+    Call the LLM, retrying the intermittent Groq 'tool_use_failed' error.
+
+    llama-3.3-70b occasionally emits malformed function-call syntax that Groq
+    rejects with a 400 (code 'tool_use_failed'). It is non-deterministic, so a
+    bounded retry usually recovers on the next attempt. Other errors propagate.
+    """
+    kwargs = {"model": LLM_MODEL, "messages": messages}
+    if use_tools:
+        kwargs["tools"] = TOOL_DEFINITIONS
+        kwargs["tool_choice"] = "auto"
+
+    for attempt in range(retries + 1):
+        try:
+            return _client.chat.completions.create(**kwargs)
+        except BadRequestError as e:
+            if "tool_use_failed" in str(e) and attempt < retries:
+                print(f"  ⚠ tool_use_failed from the model, retrying ({attempt + 1}/{retries})")
+                continue
+            raise
+
 
 def run_agent(user_message: str, history: list) -> str:
     """
@@ -128,4 +155,58 @@ def run_agent(user_message: str, history: list) -> str:
 
     Before writing code, complete specs/agent-loop-spec.md.
     """
-    return "🌱 Agent not yet implemented. Complete Milestone 2 to activate the Plant Advisor."
+    # 1. Build the messages list: system prompt, prior history, then the new turn.
+    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+
+    for turn in history:
+        # Gradio 6 passes OpenAI-style dicts: {"role": ..., "content": ...}.
+        # Tolerate the legacy [user, assistant] tuple format too.
+        if isinstance(turn, dict):
+            role, content = turn.get("role"), turn.get("content")
+            if role in ("user", "assistant") and isinstance(content, str):
+                messages.append({"role": role, "content": content})
+        else:
+            user_msg, assistant_msg = turn
+            messages.append({"role": "user", "content": user_msg})
+            if assistant_msg:
+                messages.append({"role": "assistant", "content": assistant_msg})
+
+    messages.append({"role": "user", "content": user_message})
+
+    # 2. Tool-calling loop, capped at MAX_TOOL_ROUNDS. The whole exchange is wrapped
+    #    so any API failure degrades to a readable fallback instead of crashing the
+    #    chat (the contract requires a non-empty return).
+    try:
+        for _ in range(MAX_TOOL_ROUNDS):
+            response = _complete(messages, use_tools=True)
+            assistant_message = response.choices[0].message
+
+            # Exit (a): no tool calls means the LLM produced its final answer.
+            if not assistant_message.tool_calls:
+                return assistant_message.content or _FALLBACK
+
+            # The assistant message must be appended BEFORE its tool results so the
+            # API can match each tool_call_id to the call that requested it.
+            messages.append(assistant_message)
+
+            for tool_call in assistant_message.tool_calls:
+                tool_name = tool_call.function.name
+                # llama-3.3 sometimes emits "null" or "" for a no-argument call,
+                # which json.loads turns into None. dispatch_tool expects a dict.
+                tool_args = json.loads(tool_call.function.arguments or "{}")
+                if not isinstance(tool_args, dict):
+                    tool_args = {}
+                tool_result = dispatch_tool(tool_name, tool_args)
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tool_call.id,
+                    "content": tool_result,
+                })
+
+        # 3. Exit (b): MAX_TOOL_ROUNDS reached. Force a final text answer (no tools).
+        final = _complete(messages, use_tools=False)
+        return final.choices[0].message.content or _FALLBACK
+    except Exception as e:
+        # Logged to the terminal so failures stay visible while debugging.
+        print(f"  ⚠ Agent error: {type(e).__name__}: {e}")
+        return _FALLBACK
