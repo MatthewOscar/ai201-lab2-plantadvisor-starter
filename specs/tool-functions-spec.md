@@ -70,7 +70,14 @@ likely match for clean user input. Aliases are the broadest net, so they go last
 *Aliases are stored as a list of strings. How will you check if the normalized input matches any alias in the list? Write your approach in pseudocode or plain English.*
 
 ```
-[your answer here]
+For each plant, build a lowercased copy of its aliases list and test membership:
+    normalized in [a.lower() for a in plant["aliases"]]
+This stays case-insensitive and reads clearly. With 15 plants a linear scan is fine.
+
+If the database grew to thousands of plants, I would precompute one flat dict at
+module load that maps every key, display name, and alias (all lowercased) to its
+slug. Each lookup then becomes a single O(1) dict access instead of scanning every
+plant's alias list.
 ```
 
 ---
@@ -80,8 +87,15 @@ likely match for clean user input. Aliases are the broadest net, so they go last
 *When a plant isn't found, the agent will read your message and use it to decide what to tell the user. Write the exact string you'll return — make it useful to the agent, not just to a human reading logs.*
 
 ```
-[your answer here]
+No plant matching '{name}' was found in the care database (which covers 15 common
+houseplants). Tell the user this specific plant is not in your database, then offer
+general care guidance based on the details or symptoms they describe.
 ```
+
+The message acknowledges the miss, states the database scope, and tells the agent
+to fall back to general guidance, matching the system prompt's graceful-degradation
+intent. `{name}` is the normalized input, and the count is built with
+`len(_plant_db)` so it stays correct if plants are added.
 
 ---
 
@@ -91,17 +105,22 @@ likely match for clean user input. Aliases are the broadest net, so they go last
 
 **Test: does `"devil's ivy"` return the pothos entry?**
 ```
-[yes / no — if no, describe what happened]
+Yes. Resolves via the alias pass and returns the full Pothos dict with found: True.
 ```
 
 **Test: does `"SNAKE PLANT"` return the snake plant entry?**
 ```
-[yes / no — if no, describe what happened]
+Yes. After strip().lower() it matches the "Snake Plant" display name. "  POTHOS "
+(extra whitespace) and "sansevieria" (alias) also resolve correctly.
 ```
 
 **One edge case you discovered while implementing:**
 ```
-[your answer here]
+scientific_name is not part of the search order (direct key, display name, aliases),
+even though the tool definition's description advertises scientific names like
+"Monstera deliciosa". So lookup_plant("Monstera deliciosa") returns found: False
+unless that string also appears in the aliases list. Following the spec's stated
+search order here; adding a scientific_name check would be a one-line follow-up.
 ```
 
 ---
@@ -183,12 +202,12 @@ The full season dict from `_season_data`, plus a `detected_season` boolean. Exam
 
 **Test: does calling with `season=None` return the correct season for the current month?**
 ```
-Current month: [month]
-Expected season: [season]
-Returned season: [season]
+Current month: June
+Expected season: summer
+Returned season: summer (detected_season: True)
 ```
 
 **Test: does calling with `season="winter"` return winter data regardless of the current month?**
 ```
-[yes / no]
+Yes. Returns the Winter dict with detected_season: False even though it is June.
 ```

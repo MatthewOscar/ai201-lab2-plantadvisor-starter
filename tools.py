@@ -52,10 +52,32 @@ def lookup_plant(plant_name: str) -> dict:
 
     Before writing code, complete the lookup_plant section of specs/tool-functions-spec.md.
     """
+    normalized = plant_name.strip().lower()
+
+    # 1. Direct key match (O(1) dict access, fastest path)
+    if normalized in _plant_db:
+        return {"found": True, "plant": _plant_db[normalized]}
+
+    # 2. Display name match
+    for plant in _plant_db.values():
+        if plant["display_name"].lower() == normalized:
+            return {"found": True, "plant": plant}
+
+    # 3. Alias match (broadest net, checked last)
+    for plant in _plant_db.values():
+        if normalized in [alias.lower() for alias in plant["aliases"]]:
+            return {"found": True, "plant": plant}
+
+    # Not found. The message guides how the agent should respond.
     return {
         "found": False,
-        "name": plant_name,
-        "message": "Plant lookup not yet implemented. Complete Milestone 1.",
+        "name": normalized,
+        "message": (
+            f"No plant matching '{normalized}' was found in the care database "
+            f"(which covers {len(_plant_db)} common houseplants). Tell the user this "
+            "specific plant is not in your database, then offer general care guidance "
+            "based on the details or symptoms they describe."
+        ),
     }
 
 
